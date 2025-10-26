@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import tiktoken
 
 GPT_CONFIG_124M = { 
  "vocab_size": 50257, # 词汇表大小
@@ -51,3 +52,75 @@ class MultiHeadAttention(nn.Module):
         context_vec = context_vec.contiguous().view(batch_size, num_tokens, self.d_out)
         context_vec = self.out_proj(context_vec)
         return context_vec
+
+class TransformBlock(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.att = MultiHeadAttention(
+            d_in = cfg["emb_dim"],
+            d_out = cfg["emb_dim"],
+            context_length=cfg["context_length"],
+            num_heads=cfg["n_heads"],
+            dropout=cfg["drop_rate"],
+            qkv_bias=cfg["qkv_bias"]
+        )
+        self.ffn = nn.Sequential(
+            nn.Linear(cfg["emb_dim"], 4 * cfg["emb_dim"]),
+            nn.GELU(),
+            nn.Linear(4 * cfg["emb_dim"], cfg["emb_dim"])
+        )
+        self.LayerNorm1 = nn.LayerNorm(normalized_shape=cfg["emb_dim"], eps = 1e-5)
+        self.LayerNorm2 = nn.LayerNorm(normalized_shape=cfg["emb_dim"], eps = 1e-5)
+        self.dropout = nn.Dropout(cfg["drop_rate"])
+    def forward(self, x):
+        ResNet = x
+        x = self.dropout(self.att(self.LayerNorm1(x)))
+        x = x + ResNet
+
+        ResNet = x
+        x = self.dropout(self.ffn(self.LayerNorm2(x)))
+        x = x + ResNet
+
+        return x
+
+class GPT(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.token_embed = nn.Embedding(cfg["vocab_size"], cfg["emb_dim"])
+        self.pos_embed = nn.Embedding(cfg["context_length"], cfg["emb_dim"])
+        self.dropout = nn.Dropout(cfg["drop_rate"])
+        self.block = nn.Sequential(
+            *[TransformBlock(cfg) for _ in range(cfg["n_layers"])]
+        )
+        self.norm = nn.LayerNorm(normalized_shape=cfg["emb_dim"], eps=1e-5)
+        self.out_head = nn.Linear(
+            cfg["emb_dim"], cfg["vocab_size"], bias = False
+        )
+    def forward(self, idx):
+        batch_size, seq_len = idx.shape
+        token_embed = self.token_embed(idx)
+        pos_embed = self.pos_embed(
+            torch.arange(seq_len, device=idx.device)
+        )
+        x = token_embed + pos_embed
+        x = self.dropout(x)
+        x = self.block(x)
+        self.norm(x)
+        logits = self.out_head(x)
+        return logits
+
+tokenizer = tiktoken.get_encoding("gpt2") 
+batch = [] 
+txt1 = "Every effort moves you" 
+txt2 = "Every day holds a" 
+batch.append(torch.tensor(tokenizer.encode(txt1))) 
+batch.append(torch.tensor(tokenizer.encode(txt2)))
+batch = torch.stack(batch, dim=0) 
+print(batch)
+
+torch.manual_seed(123) 
+model = GPT(GPT_CONFIG_124M) 
+out = model(batch) 
+print("Input batch:\n", batch) 
+print("\nOutput shape:", out.shape) 
+print(out)
