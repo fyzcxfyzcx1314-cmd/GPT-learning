@@ -180,6 +180,7 @@ def train_model(model, train_loader, val_loader, optimizer, device, num_epochs,
                 train_losses.append(train_loss)
                 val_losses.append(val_loss)
                 track_token_seen.append(token_seen)
+                
                 print(f"Ep {epoch+1} (Step {global_step:06d}): " 
                       f"Train loss {train_loss:.3f}, " 
                       f"Val loss {val_loss:.3f}" 
